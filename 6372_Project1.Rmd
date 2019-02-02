@@ -17,7 +17,7 @@ Kaggle describes this competition as [follows](https://www.kaggle.com/c/house-pr
 With 79 explanatory variables describing (almost) every aspect of residential homes in Ames, Iowa, this competition challenges you to predict the final price of each home.
 In this project, we have worked on some detailed EDA and many different modeling techniques to identify an algorithm that performs better with a low cross validation RMSE-score.
 
-#### 1. Load and clean the Data: 
+#### 1. Load and clean the Train Data: 
 ```{r}
 #Read in the data---------------------------------
 df.orig <- read.csv("data/AMES_train.csv", stringsAsFactors=FALSE)
@@ -56,6 +56,14 @@ df.clean$MiscFeature[is.na(df.clean$MiscFeature)] <- "None"
 #Print out number of NA's per row to ensure no NA's
 colSums(is.na(df.clean))
 
+#Set all charcter columns to factors
+charindexes <- sapply(df.clean, is.character)
+df.clean[charindexes] <- lapply(df.clean[charindexes], factor)
+
+#Remove Utilities because it is a Factor with 2 levels, and one level
+#only has 1 entry (the other 1459 are the other entry)
+df.clean$Utilities <- NULL
+
 #50% of the total number of rows
 length(df.orig$Id)/2
 
@@ -67,96 +75,133 @@ df.clean$PoolQC <- NULL
 df.clean$Fence <- NULL
 df.clean$MiscFeature <- NULL
 ```
+
 #### 2. EDA - Identify the important numeric predictors: 
 ```{r}
 #Gets only the numeric values for the scatterplots
 df.clean.numeric <- df.clean[, sapply(df.clean, is.numeric)]
-#Plots all the pairs TAKES FOREVER
-pairs(df.clean.numeric[c(38, 2:37)], gap = 0)#, pch=".")
-#In plots tab Export-Image, Save as a png: 2048x2048
-#If you don't it is way too small to see
 
-#Gets the correlation of some strength (0.7 = all 70%+ correlation )
-getcorr <- function(data.clean.numeric, corrStr)
-{
-  library(tibble)
-  library(dplyr)
-  library(tidyr)
+#Plot everything to see outliers and non-linear trends --------------
+#In plots tab Export-Image, Save as a png: 2048x2048, If you don't it is way too small to see
+#pairs(df.clean.numeric[c(38, 2:37)], gap = 0)#, pch=".")
 
-  #Saves the correlation pairs and value 
-  df.clean.cor <- data.clean.numeric %>% 
-    as.matrix %>%
-    cor %>%
-    as.data.frame %>%
-    rownames_to_column(var = 'var1') %>%
-    gather(var2, value, -var1)
-  names(df.clean.cor) <- c("Parameter1", "Parameter2", "CorStrength" )
-  
-  #Get the ones with only 'corrStr' amount of correlation
-  #Saves them into res
-  res <- filter(df.clean.cor, (CorStrength >= corrStr | CorStrength <= -corrStr ) & CorStrength != 1)
-  
-  #Finds rows [A,B,123], [B,A,123] and removes them (duplicates)
-  rmrow <- numeric()
-  len <- length(res$Parameter1)
-  for( i in c(1:(len-1)) )
-  {
-    num <- i+1
-    for(j in c(num:len))
-    {
-      if( (res[i,1] == res[j,2]) & (res[i,2] == res[j,1]) )
-      {
-        rmrow <- c(rmrow, j)
-      }
-    }
-  }
-  res <- res[-rmrow,]
-
-  #Returns res
-  res
-}
-#Creates a vector of indices of the correlated columns
-corrcolindex <- function(getcorr.data, d)
-{
-  #getcorr.data is the result of getcorr
-  #d is the numeric data that you input into getcorr
-  
-  vec <- unique( c(as.vector(getcorr.data$Parameter1), as.vector(getcorr.data$Parameter2)) )
-  nm <- names(d)
-  rownm <- numeric()
-  for(i in c(1:length(vec)))
-  {
-    for(j in c(1:length(nm)))
-    {
-      if(vec[i] == nm[j])
-      {
-        rownm <- c(rownm, j)
-      }
-    }
-  }
-  rownm
-}
-
-#Get the correlations stronger than some number
-df.clean.cor <- getcorr(df.clean.numeric[,2:37], 0.7)
-df.clean.cor.indexes <- corrcolindex(df.clean.cor, df.clean.numeric)
-
-#Shows the pairs of only the correlated values and saleprice
-#pairs(df.clean.numeric[,c(38,df.clean.cor.indexes)], gap = 0, pch = ".")
-# Tej added this section below: 
+#Correlation list and plotting--------------------------------------- 
 library(corrplot)
-#Gets only the numeric values for the scatterplots
-df.clean.numeric <- df.clean[, sapply(df.clean, is.numeric)]
-cat('There are', length(df.clean.numeric), 'numeric variables')
-#correlations of all numeric variables
-corr_numVar <- cor(df.clean.numeric, use="pairwise.complete.obs")
-#sort on decreasing correlations with SalePrice
-corr_sorted <- as.matrix(sort(corr_numVar[,'SalePrice'], decreasing = TRUE))
-#select only high corelations
-corrHigh <- names(which(apply(corr_sorted, 1, function(x) abs(x)>0.5)))
-corr_numVar <- corr_numVar[corrHigh, corrHigh]
+#Correlations of all numeric variables
+df.clean.allcor <- cor(df.clean.numeric, use="pairwise.complete.obs")
+#The cutoff point for correlation, currently randomly assigned
+corr_amt <- 0.7
+#Gets a list of all correlations with higher than 'corr_amt' of correlation
+df.clean.highcor <- subset(as.data.frame(as.table(df.clean.allcor)), (abs(Freq) > corr_amt) & (abs(Freq) < 1))
+df.clean.highcor
+#Vector of the names of the columns with high correlation
+df.clean.highcor.names <- unique( c(as.vector(df.clean.highcor$Var1), as.vector(df.clean.highcor$Var2)) )
 
-corrplot.mixed(corr_numVar, tl.col="black", tl.pos = "lt")
+#Creates a matrix of high correlation for the graphic
+df.clean.highcor.matrix <- df.clean.allcor[df.clean.highcor.names, df.clean.highcor.names]
+#Creates the high correlation graphic
+corrplot.mixed(df.clean.highcor.matrix, tl.col="black", tl.pos = "lt")
+```
+
+```{r echo=FALSE, include = FALSE}
+#Function to print out the plots for the multiple linear regression
+mlrplots <- function(fit)
+{
+  #library(MASS)
+  sres <- rstudent(fit)
+  res <- resid(fit)
+  leverage <- hatvalues(fit)
+  
+  par(mfrow=c(2,3))
+  
+  #Plot residuals
+  plot(fitted(fit), res, xlab = "Fitted", ylab = "Residuals")
+  abline(h=0, col="blue", lty=2)
+  
+  #Plot studentized residuals
+  plot(fitted(fit), sres, xlab = "Fitted", ylab = "StudResiduals")
+  abline(h=-2, col="blue", lty=2)
+  abline(h=2, col="blue", lty=2)
+  
+  #Plot Leverage - examine any observations ~2-3 times greater than the average hat value
+  plot(x = leverage, y = sres, xlab = "Leverage", ylab = "StudResiduals")
+  abline(h=-2, col="blue", lty=2)
+  abline(h=2, col="blue", lty=2)
+  abline(v = mean(leverage)*2, col="blue", lty=2) #line is at 2x mean
+  
+  #QQ Plot
+  qqnorm(sres, xlab="Quantile", ylab="Residual", main = NULL) 
+  qqline(sres, col = 2, lwd = 2, lty = 2) 
+  
+  #Cooks D
+  plot(cooks.distance(fit), xlab = "Observation", ylab = "Cooks D", col = c("blue"))
+  
+  #Histogram of residuals with normal curve
+  #If the curve looks wrong try using the studentized residuals
+  hist(res, freq=FALSE, xlab = "Residuals", main = NULL)
+  curve(dnorm(x, mean=mean(res), sd=sd(res)), add=TRUE, col = "blue")
+}
+```
+
+```{r}
+library(MASS)
+library(glmnet)  # Package to fit ridge/lasso/elastic net models
+
+set.seed(123)
+df.clean.smp_size <- floor(0.5 * nrow(df.clean))
+df.clean.train_ind <- sample(seq_len(nrow(df.clean)), size = df.clean.smp_size)
+df.clean.train <- df.clean[df.clean.train_ind, ]
+df.clean.test <- df.clean[-df.clean.train_ind, ]
+
+#df.clean.train <- df.clean
+
+#Fit for Forward, Stepwide, Backward - REMOVED HeatingQC, one of the factors only has 1 levelr
+df.clean.train.fit <- lm(SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour +LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior1st + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + Heating + CentralAir + Electrical + X1stFlrSF + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + TotRmsAbvGrd + Functional + Fireplaces + FireplaceQu + GarageType + GarageYrBlt + GarageFinish + GarageCars + GarageArea + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition, data = df.clean.train)
+
+#Stepwise
+df.clean.train.step <- stepAIC(df.clean.train.fit, direction="both", trace=FALSE)
+summary(df.clean.train.step)
+df.clean.train.step.aic <- df.clean.train.step$anova$AIC[ length(df.clean.train.step$anova$AIC) ] #Forward
+df.clean.train.forw <- stepAIC(df.clean.train.fit, direction="forward", trace=FALSE)
+summary(df.clean.train.forw)
+df.clean.train.forw.aic <- df.clean.train.forw$anova$AIC[ length(df.clean.train.forw$anova$AIC) ] #Backward
+df.clean.train.back <- stepAIC(df.clean.train.fit, direction="backward", trace=FALSE)
+df.clean.train.back$anova
+df.clean.train.back.aic <- df.clean.train.back$anova$AIC[ length(df.clean.train.back$anova$AIC) ]
+#Custom
+#Lasso
+
+#Stepwise RMSE------------------------------------------
+df.clean.train.step$xlevels$Exterior1st <- union(df.clean.train.step$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
+df.clean.train.step$xlevels$Functional <- union(df.clean.train.step$xlevels$Functional, levels(df.clean.test$Functional))
+df.clean.pred.step <- predict(df.clean.train.step, df.clean.test, type="response")
+#Forward RMSE--------------------------------------------
+df.clean.train.forw$xlevels$Exterior1st <- union(df.clean.train.forw$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
+df.clean.train.forw$xlevels$Exterior2nd <- union(df.clean.train.forw$xlevels$Exterior2nd, levels(df.clean.test$Exterior2nd))
+df.clean.train.forw$xlevels$Functional <- union(df.clean.train.forw$xlevels$Functional, levels(df.clean.test$Functional))
+df.clean.train.forw$xlevels$Condition2 <- union(df.clean.train.forw$xlevels$Condition2, levels(df.clean.test$Condition2))
+df.clean.train.forw$xlevels$RoofStyle <- union(df.clean.train.forw$xlevels$RoofStyle, levels(df.clean.test$RoofStyle))
+df.clean.train.forw$xlevels$ExterCond <- union(df.clean.train.forw$xlevels$ExterCond, levels(df.clean.test$ExterCond))
+df.clean.train.forw$xlevels$Heating <- union(df.clean.train.forw$xlevels$Heating, levels(df.clean.test$Heating))
+df.clean.train.forw$xlevels$Electrical <- union(df.clean.train.forw$xlevels$Electrical, levels(df.clean.test$Electrical))
+df.clean.pred.forw <- predict(df.clean.train.forw, df.clean.test, type="response")
+#Stepwise RMSE------------------------------------------
+df.clean.train.back$xlevels$Exterior1st <- union(df.clean.train.back$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
+df.clean.train.back$xlevels$Functional <- union(df.clean.train.back$xlevels$Functional, levels(df.clean.test$Functional))
+df.clean.pred.back <- predict(df.clean.train.back, df.clean.test, type="response")
+#------------------------------------------
+
+library(Metrics)
+rmse(df.clean.pred.step, df.clean.test$SalePrice)
+rmse(df.clean.pred.forw, df.clean.test$SalePrice)
+rmse(df.clean.pred.back, df.clean.test$SalePrice)
+
+cor(df.clean.train.step$model)
+
+#df.clean.lasso <- glmnet(x.train, y.train, family="gaussian", alpha=1)
+
+
+
 ```
 
 

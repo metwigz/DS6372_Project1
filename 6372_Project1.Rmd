@@ -64,6 +64,9 @@ df.clean[charindexes] <- lapply(df.clean[charindexes], factor)
 #only has 1 entry (the other 1459 are the other entry)
 df.clean$Utilities <- NULL
 
+#Remove ID because its literally just the ID
+df.clean$Id <- NULL
+
 #50% of the total number of rows
 length(df.orig$Id)/2
 
@@ -76,23 +79,57 @@ df.clean$Fence <- NULL
 df.clean$MiscFeature <- NULL
 ```
 
+```{r echo=FALSE, include=FALSE}
+#Finds rows [A,B,123], [B,A,123] and removes them (duplicates)
+rmCorDup <- function(res)
+{
+  rmrow <- numeric()
+  len <- length(res$Var1)
+  for( i in c(1:(len-1)) )
+  {
+    num <- i+1
+    for(j in c(num:len))
+    {
+      if( (res[i,1] == res[j,2]) & (res[i,2] == res[j,1]) )
+      {
+        rmrow <- c(rmrow, j)
+      }
+    }
+  }
+  res <- res[-rmrow,]
+  res
+}
+```
+
 #### 2. EDA - Identify the important numeric predictors: 
+##### 2a. Transformation of data: 
 ```{r}
 #Gets only the numeric values for the scatterplots
 df.clean.numeric <- df.clean[, sapply(df.clean, is.numeric)]
 
-#Plot everything to see outliers and non-linear trends --------------
+#Transformations-----------------------------------------------------
 #In plots tab Export-Image, Save as a png: 2048x2048, If you don't it is way too small to see
-#pairs(df.clean.numeric[c(38, 2:37)], gap = 0)#, pch=".")
+#pairs(df.clean.numeric[c(37, 1:36)], gap = 0)#, pch=".")
 
+#Based on the pairs plot SalePrice should have a log transformation
+df.clean.numeric$L_SalePrice <- log(df.clean.numeric$SalePrice)
+df.clean$L_SalePrice <- log(df.clean$SalePrice)
+#Plot again (commented out again because long run time)
+#pairs(df.clean.numeric[c(38, 1:36)], gap = 0)#, pch=".")
+#End Transforming----------------------------------------------------
+```
+
+##### 2b. Correlation Removal: 
+```{r}
 #Correlation list and plotting--------------------------------------- 
 library(corrplot)
 #Correlations of all numeric variables
-df.clean.allcor <- cor(df.clean.numeric, use="pairwise.complete.obs")
+#NOTE: -c(37) removes the unlogged SalePrice
+df.clean.allcor <- cor(df.clean.numeric[,-c(37)], use="pairwise.complete.obs")
 #The cutoff point for correlation, currently randomly assigned
 corr_amt <- 0.7
 #Gets a list of all correlations with higher than 'corr_amt' of correlation
-df.clean.highcor <- subset(as.data.frame(as.table(df.clean.allcor)), (abs(Freq) > corr_amt) & (abs(Freq) < 1))
+df.clean.highcor <- rmCorDup(subset(as.data.frame(as.table(df.clean.allcor)), (abs(Freq) > corr_amt) & (abs(Freq) < 1)))
 df.clean.highcor
 #Vector of the names of the columns with high correlation
 df.clean.highcor.names <- unique( c(as.vector(df.clean.highcor$Var1), as.vector(df.clean.highcor$Var2)) )
@@ -101,6 +138,45 @@ df.clean.highcor.names <- unique( c(as.vector(df.clean.highcor$Var1), as.vector(
 df.clean.highcor.matrix <- df.clean.allcor[df.clean.highcor.names, df.clean.highcor.names]
 #Creates the high correlation graphic
 corrplot.mixed(df.clean.highcor.matrix, tl.col="black", tl.pos = "lt")
+
+#Remove columns with ultra high correlation----------------------------
+#The NA's in GarageYrBlt were a combo of YearBuilt and YearRemodAdd
+#GarageYrBlt (0.83) YearBuilt 
+df.clean$GarageYrBlt <- NULL
+df.clean.numeric$GarageYrBlt <- NULL
+
+#Both of these are indicating nearly the same thing
+#GarageCars is more commonly used than GarageArea
+#GarageArea (0.88) GarageCars
+df.clean$GarageArea <- NULL
+df.clean.numeric$GarageArea <- NULL
+
+#More space generally = more rooms
+#GrLivArea (0.825) TotRmsAbvGrd
+df.clean$TotRmsAbvGrd <- NULL
+df.clean.numeric$TotRmsAbvGrd <- NULL
+```
+
+##### 2c. Make correlation plots again: 
+```{r}
+#MAKE CORRELATION PLOTS AGAIN WITH LOWER CORRELATION-------------------
+#NOTE: -c(34) removes the unlogged SalePrice
+df.clean.allcor <- cor(df.clean.numeric[,-c(34)], use="pairwise.complete.obs")
+#The cutoff point for correlation, currently randomly assigned
+corr_amt <- 0.6
+#Gets a list of all correlations with higher than 'corr_amt' of correlation
+df.clean.highcor <- rmCorDup(subset(as.data.frame(as.table(df.clean.allcor)), (abs(Freq) > corr_amt) & (abs(Freq) < 1)))
+df.clean.highcor
+#Vector of the names of the columns with high correlation
+df.clean.highcor.names <- unique( c(as.vector(df.clean.highcor$Var1), as.vector(df.clean.highcor$Var2)) )
+
+#Creates a matrix of high correlation for the graphic
+df.clean.highcor.matrix <- df.clean.allcor[df.clean.highcor.names, df.clean.highcor.names]
+#Creates the high correlation graphic
+corrplot.mixed(df.clean.highcor.matrix, tl.col="black", tl.pos = "lt")
+
+#All pairs after removal of all heavily correlated ones
+#pairs(df.clean.numeric[,c(length(df.clean.numeric), 1:(length(df.clean.numeric)-2))], gap = 0)#, pch=".")
 ```
 
 ```{r echo=FALSE, include = FALSE}
@@ -143,8 +219,18 @@ mlrplots <- function(fit)
 }
 ```
 
+```{r echo=FALSE, include=FALSE}
+#Makes the VIF plot for the LM models 
+makevif <- function(df, yresp)
+{
+  library(mctest)
+  imcdiag(x = as.matrix(df[, sapply(df, is.numeric)]), y=yresp, method="VIF")
+}
+```
+
 ```{r}
 library(MASS)
+#library(car)
 library(glmnet)  # Package to fit ridge/lasso/elastic net models
 
 set.seed(123)
@@ -153,27 +239,58 @@ df.clean.train_ind <- sample(seq_len(nrow(df.clean)), size = df.clean.smp_size)
 df.clean.train <- df.clean[df.clean.train_ind, ]
 df.clean.test <- df.clean[-df.clean.train_ind, ]
 
-#Fit for Forward, Stepwide, Backward - REMOVED HeatingQC, one of the factors only has 1 levelr
-df.clean.train.fit <- lm(SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour +LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior1st + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + Heating + CentralAir + Electrical + X1stFlrSF + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + TotRmsAbvGrd + Functional + Fireplaces + FireplaceQu + GarageType + GarageYrBlt + GarageFinish + GarageCars + GarageArea + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition, data = df.clean.train)
+#Fit for Forward, Stepwide, Backward - 
+#REMOVED HeatingQC, one of the factors only has 1 level
+df.clean.train.fit <- lm(L_SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour +LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior1st + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + Heating + CentralAir + Electrical + X1stFlrSF + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + Functional + Fireplaces + FireplaceQu + GarageType + GarageFinish + GarageCars + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition, data = df.clean.train)
 
-#Stepwise
+#Lasso
+#df.clean.lasso <- glmnet(df.clean.train[,c(1:72)], df.clean.train$L_SalePrice, family="gaussian", alpha=1)
+
+#Stepwise------------------------------------------
 df.clean.train.step <- stepAIC(df.clean.train.fit, direction="both", trace=FALSE)
+#Summary of stepwise with p-values
 summary(df.clean.train.step)
-df.clean.train.step.aic <- df.clean.train.step$anova$AIC[ length(df.clean.train.step$anova$AIC) ] #Forward
+#The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
+df.clean.train.step.vif <- makevif(df.clean.train.step$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.step.vif
+#Overall AIC for the model
+df.clean.train.step.aic <- df.clean.train.step$anova$AIC[ length(df.clean.train.step$anova$AIC) ] 
+#Plots for the model
+mlrplots(df.clean.train.step)
+
+#Forward-------------------------------------------
 df.clean.train.forw <- stepAIC(df.clean.train.fit, direction="forward", trace=FALSE)
+#Summary of forward with p-values
 summary(df.clean.train.forw)
-df.clean.train.forw.aic <- df.clean.train.forw$anova$AIC[ length(df.clean.train.forw$anova$AIC) ] #Backward
+#The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
+df.clean.train.forw.vif <- makevif(df.clean.train.forw$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.forw.vif
+#Overall AIC for the model
+df.clean.train.forw.aic <- df.clean.train.forw$anova$AIC[ length(df.clean.train.forw$anova$AIC) ]
+#Plots for the model
+mlrplots(df.clean.train.forw)
+
+#Backward------------------------------------------
 df.clean.train.back <- stepAIC(df.clean.train.fit, direction="backward", trace=FALSE)
-df.clean.train.back$anova
+#Summary of backward with p-values
+summary(df.clean.train.back)
+#The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
+df.clean.train.back.vif <- makevif(df.clean.train.back$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.back.vif
+#Overall AIC for the model
 df.clean.train.back.aic <- df.clean.train.back$anova$AIC[ length(df.clean.train.back$anova$AIC) ]
+#Plots for the model
+mlrplots(df.clean.train.back)
+
 #Custom
+
 #Lasso
 
-#Stepwise RMSE------------------------------------------
+#Stepwise RMSE, have to do this otherwise errors---------------
 df.clean.train.step$xlevels$Exterior1st <- union(df.clean.train.step$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
 df.clean.train.step$xlevels$Functional <- union(df.clean.train.step$xlevels$Functional, levels(df.clean.test$Functional))
 df.clean.pred.step <- predict(df.clean.train.step, df.clean.test, type="response")
-#Forward RMSE--------------------------------------------
+#Forward RMSE, have to do this otherwise errors---------------
 df.clean.train.forw$xlevels$Exterior1st <- union(df.clean.train.forw$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
 df.clean.train.forw$xlevels$Exterior2nd <- union(df.clean.train.forw$xlevels$Exterior2nd, levels(df.clean.test$Exterior2nd))
 df.clean.train.forw$xlevels$Functional <- union(df.clean.train.forw$xlevels$Functional, levels(df.clean.test$Functional))
@@ -183,7 +300,7 @@ df.clean.train.forw$xlevels$ExterCond <- union(df.clean.train.forw$xlevels$Exter
 df.clean.train.forw$xlevels$Heating <- union(df.clean.train.forw$xlevels$Heating, levels(df.clean.test$Heating))
 df.clean.train.forw$xlevels$Electrical <- union(df.clean.train.forw$xlevels$Electrical, levels(df.clean.test$Electrical))
 df.clean.pred.forw <- predict(df.clean.train.forw, df.clean.test, type="response")
-#Stepwise RMSE------------------------------------------
+#Backward RMSE, have to do this otherwise errors---------------
 df.clean.train.back$xlevels$Exterior1st <- union(df.clean.train.back$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
 df.clean.train.back$xlevels$Functional <- union(df.clean.train.back$xlevels$Functional, levels(df.clean.test$Functional))
 df.clean.pred.back <- predict(df.clean.train.back, df.clean.test, type="response")
@@ -193,6 +310,17 @@ library(Metrics)
 rmse(df.clean.pred.step, df.clean.test$SalePrice)
 rmse(df.clean.pred.forw, df.clean.test$SalePrice)
 rmse(df.clean.pred.back, df.clean.test$SalePrice)
+
+```
+
+```{r}
+
+#TEMOPORARY CUSTOM MODEL----------------------------
+#df.clean.train.cust <- lm(L_SalePrice ~ OverallQual + TotalBsmtSF + GrLivArea + GarageCars, data = df.clean.train)
+#mlrplots(df.clean.train.cust)
+#summary(df.clean.train.cust)
+#df.clean.pred.cust <- predict(df.clean.train.cust, df.clean.test, type="response")
+#rmse(df.clean.pred.cust, df.clean.test$SalePrice)
 
 ```
 

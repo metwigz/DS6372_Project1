@@ -210,7 +210,11 @@ mlrplots <- function(fit)
   qqline(sres, col = 2, lwd = 2, lty = 2) 
   
   #Cooks D
-  plot(cooks.distance(fit), xlab = "Observation", ylab = "Cooks D", col = c("blue"))
+  cooksd <- cooks.distance(fit)
+  sample_size <- length(fit$model[,1])
+  plot(cooksd, xlab = "Observation", ylab = "Cooks D", col = c("blue"))
+  abline(h = 4/sample_size, col="red")  # add cutoff line
+  text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4/sample_size, names(cooksd),""), col="red")  # add labels
   
   #Histogram of residuals with normal curve
   #If the curve looks wrong try using the studentized residuals
@@ -228,9 +232,19 @@ makevif <- function(df, yresp)
 }
 ```
 
+```{r echo=FALSE, include=FALSE}
+#Adjusted r-squared
+adjr <- function(rval, n, p)
+{
+  rr <- 1-(1-rval*rval)*((n-1)/(n-p-1))
+  rr
+}
+```
+
+### Creates the test and training sets
 ```{r}
 library(MASS)
-#library(car)
+library(Metrics) # RMSE
 library(glmnet)  # Package to fit ridge/lasso/elastic net models
 
 set.seed(123)
@@ -238,15 +252,16 @@ df.clean.smp_size <- floor(0.5 * nrow(df.clean))
 df.clean.train_ind <- sample(seq_len(nrow(df.clean)), size = df.clean.smp_size)
 df.clean.train <- df.clean[df.clean.train_ind, ]
 df.clean.test <- df.clean[-df.clean.train_ind, ]
+```
 
-#Fit for Forward, Stepwide, Backward - 
-#REMOVED HeatingQC, one of the factors only has 1 level
-df.clean.train.fit <- lm(L_SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour +LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior1st + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + Heating + CentralAir + Electrical + X1stFlrSF + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + Functional + Fireplaces + FireplaceQu + GarageType + GarageFinish + GarageCars + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition, data = df.clean.train)
-
-#Lasso
-#df.clean.lasso <- glmnet(df.clean.train[,c(1:72)], df.clean.train$L_SalePrice, family="gaussian", alpha=1)
-
+### Stepwise
+```{r}
 #Stepwise------------------------------------------
+#Fit for Stepwise
+#REMOVED HeatingQC, Exterior1st, Functional, Heating because they didn't have enough of each level
+df.clean.train.fit <- lm(L_SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour +LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + CentralAir + Electrical + X1stFlrSF + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + Fireplaces + FireplaceQu + GarageType + GarageFinish + GarageCars + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition, data = df.clean.train)
+
+#Stepwise call
 df.clean.train.step <- stepAIC(df.clean.train.fit, direction="both", trace=FALSE)
 #Summary of stepwise with p-values
 summary(df.clean.train.step)
@@ -258,70 +273,43 @@ df.clean.train.step.aic <- df.clean.train.step$anova$AIC[ length(df.clean.train.
 #Plots for the model
 mlrplots(df.clean.train.step)
 
-#Forward-------------------------------------------
-df.clean.train.forw <- stepAIC(df.clean.train.fit, direction="forward", trace=FALSE)
-#Summary of forward with p-values
-summary(df.clean.train.forw)
-#The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
-df.clean.train.forw.vif <- makevif(df.clean.train.forw$model[,-c(1)], df.clean.test$L_SalePrice)
-df.clean.train.forw.vif
-#Overall AIC for the model
-df.clean.train.forw.aic <- df.clean.train.forw$anova$AIC[ length(df.clean.train.forw$anova$AIC) ]
-#Plots for the model
-mlrplots(df.clean.train.forw)
+#Prediction
+df.clean.pred.step <- predict(df.clean.train.step, df.clean.test, type="response")
+#RMSE
+rmse(df.clean.test$SalePrice, exp(df.clean.pred.step))
+#Adjusted r squared on test
+adjr(cor(df.clean.test$SalePrice, exp(df.clean.pred.step)), length(df.clean.train$L_SalePrice), length(names(df.clean.train.step$model)))
+#Plot of the predicted vs actual
+plot(exp(df.clean.pred.step), df.clean.test$SalePrice)
+```
 
-#Backward------------------------------------------
-df.clean.train.back <- stepAIC(df.clean.train.fit, direction="backward", trace=FALSE)
-#Summary of backward with p-values
-summary(df.clean.train.back)
+### Custom Model
+```{r}
+#Custom Model----------------------------------------------------------
+df.clean.train.cust <- lm(L_SalePrice ~ LotArea + Neighborhood + OverallQual + OverallCond + YearBuilt + GrLivArea + GarageCars + YearRemodAdd + BsmtFinSF1 + YearRemodAdd*OverallCond, data = df.clean.train) #to remove a row: df.clean.train[row.names(df.clean.train) != "1299",]
+summary(df.clean.train.cust)
 #The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
-df.clean.train.back.vif <- makevif(df.clean.train.back$model[,-c(1)], df.clean.test$L_SalePrice)
-df.clean.train.back.vif
-#Overall AIC for the model
-df.clean.train.back.aic <- df.clean.train.back$anova$AIC[ length(df.clean.train.back$anova$AIC) ]
+df.clean.train.cust.vif <- makevif(df.clean.train.cust$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.cust.vif
 #Plots for the model
-mlrplots(df.clean.train.back)
+mlrplots(df.clean.train.cust)
 
-#Custom
+#pairs(df.clean.train[-c(1299, 890, 327),c(73, 4, 10, 15, 16, 17, 32, 44, 57, 18)])
+
+#Predicted Values
+df.clean.pred.cust <- predict(df.clean.train.cust, df.clean.test, type="response")
+#RMSE
+rmse(df.clean.test$SalePrice, exp(df.clean.pred.cust))
+#Adjusted r squared on test
+adjr(cor(df.clean.test$SalePrice, exp(df.clean.pred.cust)), length(df.clean.train$L_SalePrice), length(names(df.clean.train.cust$model)))
+#Plot of the predicted vs actual
+plot(exp(df.clean.pred.cust), df.clean.test$SalePrice)
+#------------------------------------------
 
 #Lasso
 
-#Stepwise RMSE, have to do this otherwise errors---------------
-df.clean.train.step$xlevels$Exterior1st <- union(df.clean.train.step$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
-df.clean.train.step$xlevels$Functional <- union(df.clean.train.step$xlevels$Functional, levels(df.clean.test$Functional))
-df.clean.pred.step <- predict(df.clean.train.step, df.clean.test, type="response")
-#Forward RMSE, have to do this otherwise errors---------------
-df.clean.train.forw$xlevels$Exterior1st <- union(df.clean.train.forw$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
-df.clean.train.forw$xlevels$Exterior2nd <- union(df.clean.train.forw$xlevels$Exterior2nd, levels(df.clean.test$Exterior2nd))
-df.clean.train.forw$xlevels$Functional <- union(df.clean.train.forw$xlevels$Functional, levels(df.clean.test$Functional))
-df.clean.train.forw$xlevels$Condition2 <- union(df.clean.train.forw$xlevels$Condition2, levels(df.clean.test$Condition2))
-df.clean.train.forw$xlevels$RoofStyle <- union(df.clean.train.forw$xlevels$RoofStyle, levels(df.clean.test$RoofStyle))
-df.clean.train.forw$xlevels$ExterCond <- union(df.clean.train.forw$xlevels$ExterCond, levels(df.clean.test$ExterCond))
-df.clean.train.forw$xlevels$Heating <- union(df.clean.train.forw$xlevels$Heating, levels(df.clean.test$Heating))
-df.clean.train.forw$xlevels$Electrical <- union(df.clean.train.forw$xlevels$Electrical, levels(df.clean.test$Electrical))
-df.clean.pred.forw <- predict(df.clean.train.forw, df.clean.test, type="response")
-#Backward RMSE, have to do this otherwise errors---------------
-df.clean.train.back$xlevels$Exterior1st <- union(df.clean.train.back$xlevels$Exterior1st, levels(df.clean.test$Exterior1st))
-df.clean.train.back$xlevels$Functional <- union(df.clean.train.back$xlevels$Functional, levels(df.clean.test$Functional))
-df.clean.pred.back <- predict(df.clean.train.back, df.clean.test, type="response")
-#------------------------------------------
-
-library(Metrics)
-rmse(df.clean.pred.step, df.clean.test$SalePrice)
-rmse(df.clean.pred.forw, df.clean.test$SalePrice)
-rmse(df.clean.pred.back, df.clean.test$SalePrice)
-
-```
-
-```{r}
-
-#TEMOPORARY CUSTOM MODEL----------------------------
-#df.clean.train.cust <- lm(L_SalePrice ~ OverallQual + TotalBsmtSF + GrLivArea + GarageCars, data = df.clean.train)
-#mlrplots(df.clean.train.cust)
-#summary(df.clean.train.cust)
-#df.clean.pred.cust <- predict(df.clean.train.cust, df.clean.test, type="response")
-#rmse(df.clean.pred.cust, df.clean.test$SalePrice)
-
+#Lasso
+#df.clean.lasso <- glmnet(df.clean.train[,c(1:72)], df.clean.train$L_SalePrice, family="gaussian", alpha=1)
 ```
 
 

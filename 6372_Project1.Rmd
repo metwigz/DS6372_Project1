@@ -77,6 +77,15 @@ df.clean$Alley <- NULL
 df.clean$PoolQC <- NULL
 df.clean$Fence <- NULL
 df.clean$MiscFeature <- NULL
+
+#Number of bathrooms in general are more important than their location
+#plus the number.
+df.clean$AllHalfBaths <- df.clean$BsmtHalfBath + df.clean$HalfBath
+df.clean$AllFullBath <- df.clean$BsmtFullBath + df.clean$FullBath
+df.clean$HalfBath <- NULL
+df.clean$FullBath <- NULL
+df.clean$BsmtFullBath <- NULL
+df.clean$BsmtHalfBath <- NULL
 ```
 
 ```{r echo=FALSE, include=FALSE}
@@ -124,8 +133,8 @@ df.clean$L_SalePrice <- log(df.clean$SalePrice)
 #Correlation list and plotting--------------------------------------- 
 library(corrplot)
 #Correlations of all numeric variables
-#NOTE: -c(37) removes the unlogged SalePrice
-df.clean.allcor <- cor(df.clean.numeric[,-c(37)], use="pairwise.complete.obs")
+#NOTE: -c(33) removes the unlogged SalePrice
+df.clean.allcor <- cor(df.clean.numeric[,-c(33)], use="pairwise.complete.obs")
 #The cutoff point for correlation, currently randomly assigned
 corr_amt <- 0.7
 #Gets a list of all correlations with higher than 'corr_amt' of correlation
@@ -160,8 +169,8 @@ df.clean.numeric$TotRmsAbvGrd <- NULL
 ##### 2c. Make correlation plots again: 
 ```{r}
 #MAKE CORRELATION PLOTS AGAIN WITH LOWER CORRELATION-------------------
-#NOTE: -c(34) removes the unlogged SalePrice
-df.clean.allcor <- cor(df.clean.numeric[,-c(34)], use="pairwise.complete.obs")
+#NOTE: -c(30) removes the unlogged SalePrice
+df.clean.allcor <- cor(df.clean.numeric[,-c(30)], use="pairwise.complete.obs")
 #The cutoff point for correlation, currently randomly assigned
 corr_amt <- 0.6
 #Gets a list of all correlations with higher than 'corr_amt' of correlation
@@ -259,7 +268,8 @@ df.clean.test <- df.clean[-df.clean.train_ind, ]
 #Stepwise------------------------------------------
 #Fit for Stepwise
 #REMOVED HeatingQC, Exterior1st, Functional, Heating because they didn't have enough of each level
-df.clean.train.fit <- lm(L_SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour +LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + CentralAir + Electrical + X1stFlrSF + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath + BsmtHalfBath + FullBath + HalfBath + BedroomAbvGr + KitchenAbvGr + KitchenQual + Fireplaces + FireplaceQu + GarageType + GarageFinish + GarageCars + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition, data = df.clean.train)
+# + X1stFlrSF + X2ndFlrSF, and GrLivArea are similar so the first two were removed
+df.clean.train.fit <- lm(L_SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour + LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + TotalBsmtSF + CentralAir + Electrical + LowQualFinSF + GrLivArea + AllFullBath + AllHalfBaths + BedroomAbvGr + KitchenAbvGr + KitchenQual + Fireplaces + FireplaceQu + GarageType + GarageFinish + GarageCars + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition + GrLivArea*GarageCars, data = df.clean.train)
 
 #Stepwise call
 df.clean.train.step <- stepAIC(df.clean.train.fit, direction="both", trace=FALSE)
@@ -286,7 +296,8 @@ plot(exp(df.clean.pred.step), df.clean.test$SalePrice)
 ### Custom Model
 ```{r}
 #Custom Model----------------------------------------------------------
-df.clean.train.cust <- lm(L_SalePrice ~ LotArea + Neighborhood + OverallQual + OverallCond + YearBuilt + GrLivArea + GarageCars + YearRemodAdd + BsmtFinSF1 + YearRemodAdd*OverallCond, data = df.clean.train) #to remove a row: df.clean.train[row.names(df.clean.train) != "1299",]
+#df.clean.train.cust <- lm(L_SalePrice ~ LotArea + Neighborhood + OverallQual + OverallCond + YearBuilt + GrLivArea + GarageCars + YearRemodAdd + BsmtFinSF1, data = df.clean.train) #to remove a row: df.clean.train[row.names(df.clean.train) != "1299",]
+df.clean.train.cust <- lm(L_SalePrice ~ OverallQual + TotalBsmtSF + GrLivArea + GarageCars + AllFullBath + Neighborhood + OverallCond, data = df.clean.train)
 summary(df.clean.train.cust)
 #The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
 df.clean.train.cust.vif <- makevif(df.clean.train.cust$model[,-c(1)], df.clean.test$L_SalePrice)
@@ -295,6 +306,8 @@ df.clean.train.cust.vif
 mlrplots(df.clean.train.cust)
 
 #pairs(df.clean.train[-c(1299, 890, 327),c(73, 4, 10, 15, 16, 17, 32, 44, 57, 18)])
+
+plot(df.clean.train.cust$residuals, df.clean.train.cust$model$AllFullBath)
 
 #Predicted Values
 df.clean.pred.cust <- predict(df.clean.train.cust, df.clean.test, type="response")
@@ -404,7 +417,7 @@ skew(df.clean$SalePrice)
 train1 <- combined[!is.na(df.clean$SalePrice),]
 test1 <- combined[is.na(df.clean$SalePrice),]
 # # 
-set.seed(27042018)
+set.seed(123)
 my_control <-trainControl(method="cv", number=5)
 lassoGrid <- expand.grid(alpha = 1, lambda = seq(0.001,0.1,by = 0.0005))
 # # 

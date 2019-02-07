@@ -326,6 +326,53 @@ plot(exp(df.clean.pred.cust), df.clean.test$SalePrice)
 
 ```
 
+```{r}
+library(glmnet)
+
+df.clean.numeric <- df.clean[, sapply(df.clean, is.numeric)]
+df.clean.factors <- df.clean[, !(names(df.clean) %in% names(df.clean.numeric))]
+
+DFdummies <- as.data.frame(model.matrix(~.-1, df.clean.factors))
+dim(DFdummies)
+
+#Also taking out variables with less than 10 'ones' in the train set.
+fewOnes <- which(colSums(DFdummies[1:nrow(df.clean),]) < 10)
+#Removing predictors with < 10
+DFdummies <- DFdummies[,-fewOnes]
+#combining all (now numeric) predictors into one dataframe 
+df.clean.combined <- cbind(df.clean.numeric, DFdummies)
+
+set.seed(123)
+df.clean.smp_size <- floor(0.5 * nrow(df.clean.combined))
+df.clean.train_ind <- sample(seq_len(nrow(df.clean)), size = df.clean.smp_size)
+df.clean.combined.train <- df.clean.combined[df.clean.train_ind, ]
+df.clean.combined.test <- df.clean.combined[-df.clean.train_ind, ]
+
+#------------------------------------------------------------------------------
+
+#Formatting data for GLM net
+x = model.matrix(df.clean.combined.train$L_SalePrice ~ ., data = df.clean.combined.train[, -which(names(df.clean.combined.train) %in% c("SalePrice","L_SalePrice"))])
+y = df.clean.combined.train$L_SalePrice
+
+xtest = model.matrix(df.clean.combined.test$L_SalePrice ~ ., data = df.clean.combined.test[, -which(names(df.clean.combined.test) %in% c("SalePrice","L_SalePrice"))])
+ytest <- df.clean.combined.test$L_SalePrice
+
+#creating a huge range for the penalty parameter
+grid=10^seq(10,-2, length =100)
+lasso.mod=glmnet(x,y,alpha=1, lambda =grid)
+
+cv.out=cv.glmnet(x,y,alpha=1) #alpha=1 performs LASSO
+plot(cv.out)
+bestlambda <- cv.out$lambda.min  #Optimal penalty parameter.  You can make this call visually.
+lasso.pred = predict(lasso.mod, s=bestlambda, newx=xtest)
+
+#testMSE_LASSO <- mean((ytest-lasso.pred)^2)
+#testMSE_LASSO
+
+#coef(lasso.mod,s=bestlambda)
+
+```
+
 ### Lasso Model
 ```{r}
 # load libraries
@@ -426,6 +473,9 @@ lassoGrid <- expand.grid(alpha = 1, lambda = seq(0.001,0.1,by = 0.0005))
 lasso_mod <- train(x=train1, y=df.clean$SalePrice[!is.na(df.clean$SalePrice)], method='glmnet', trControl= my_control, tuneGrid=lassoGrid) 
 lasso_mod$bestTune
 min(lasso_mod$results$RMSE)
+
+#
+
 ```
 
 

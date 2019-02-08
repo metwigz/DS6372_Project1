@@ -196,7 +196,7 @@ corrplot.mixed(df.clean.highcor.matrix, tl.col="black", tl.pos = "lt")
 
 ```{r echo=FALSE, include = FALSE}
 #Function to print out the plots for the multiple linear regression
-mlrplots <- function(fit)
+mlrplots <- function(fit, hidenum = FALSE)
 {
   #library(MASS)
   sres <- rstudent(fit)
@@ -207,13 +207,15 @@ mlrplots <- function(fit)
   
   #Plot residuals
   plot(fitted(fit), res, xlab = "Fitted", ylab = "Residuals")
-  abline(h=0, col="blue", lty=2)
-  
+  abline(h=0, col="blue", lty=2)  
+
   #Plot studentized residuals
   plot(fitted(fit), sres, xlab = "Fitted", ylab = "StudResiduals")
   abline(h=-2, col="blue", lty=2)
   abline(h=2, col="blue", lty=2)
-  
+  if(!hidenum)
+    text(sres~fitted(fit), y=sres, labels=ifelse( abs(sres) >= 2, names(sres),""), col="red")  
+
   #Plot Leverage - examine any observations ~2-3 times greater than the average hat value
   plot(x = leverage, y = sres, xlab = "Leverage", ylab = "StudResiduals")
   abline(h=-2, col="blue", lty=2)
@@ -229,7 +231,8 @@ mlrplots <- function(fit)
   sample_size <- length(fit$model[,1])
   plot(cooksd, xlab = "Observation", ylab = "Cooks D", col = c("blue"))
   abline(h = 4/sample_size, col="red")  # add cutoff line
-  text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4/sample_size, names(cooksd),""), col="red")  # add labels
+  if(!hidenum)
+    text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4/sample_size, names(cooksd),""), col="red")  # add labels
   
   #Histogram of residuals with normal curve
   #If the curve looks wrong try using the studentized residuals
@@ -287,7 +290,7 @@ df.clean.train.step.vif
 #Overall AIC for the model
 df.clean.train.step.aic <- df.clean.train.step$anova$AIC[ length(df.clean.train.step$anova$AIC) ] 
 #Plots for the model
-mlrplots(df.clean.train.step)
+mlrplots(df.clean.train.step, TRUE)
 
 #Prediction
 df.clean.pred.step <- predict(df.clean.train.step, df.clean.test, type="response")
@@ -313,7 +316,11 @@ mlrplots(df.clean.train.cust)
 
 #pairs(df.clean.train[-c(1299, 890, 327),c(73, 4, 10, 15, 16, 17, 32, 44, 57, 18)])
 
-plot(df.clean.train.cust$residuals, df.clean.train.cust$model$AllFullBath)
+for(i in c(2:length(df.clean.train.cust$model) ) )
+{
+  plot(df.clean.train.cust$model[,i], df.clean.train.cust$residuals, xlab = names(df.clean.train.cust$model)[i])
+}
+#  plot(df.clean.train.cust$residuals, df.clean.train.cust$model$AllFullBath)
 
 #Predicted Values
 df.clean.pred.cust <- predict(df.clean.train.cust, df.clean.test, type="response")

@@ -196,7 +196,7 @@ corrplot.mixed(df.clean.highcor.matrix, tl.col="black", tl.pos = "lt")
 
 ```{r echo=FALSE, include = FALSE}
 #Function to print out the plots for the multiple linear regression
-mlrplots <- function(fit, hidenum = FALSE)
+mlrplots <- function(fit, hidenum = TRUE)
 {
   #library(MASS)
   sres <- rstudent(fit)
@@ -279,18 +279,24 @@ df.clean.test <- df.clean[-df.clean.train_ind, ]
 #REMOVED HeatingQC, Exterior1st, Functional, Heating, Electrical because they didn't have enough of each level
 # + X1stFlrSF + X2ndFlrSF, and TotalSqFeet are similar so the first two were removed
 df.clean.train.fit <- lm(L_SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour + LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + CentralAir + LowQualFinSF + AllFullBath + AllHalfBaths + BedroomAbvGr + KitchenAbvGr + KitchenQual + Fireplaces + FireplaceQu + GarageType + GarageFinish + GarageCars + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition + TotalSqFeet + TotalSqFeet*GarageCars, data = df.clean.train)
+#[!(row.names(df.clean.train) %in% c("633", "94", "534", "689", "589")),]
 
 #Stepwise call
 df.clean.train.step <- stepAIC(df.clean.train.fit, direction="both", trace=FALSE)
 #Summary of stepwise with p-values
 summary(df.clean.train.step)
 #The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
-df.clean.train.step.vif <- makevif(df.clean.train.step$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.step.vif <- makevif(df.clean.train.step$model[,-c(1)], df.clean.train.step$model$L_SalePrice)
 df.clean.train.step.vif
 #Overall AIC for the model
 df.clean.train.step.aic <- df.clean.train.step$anova$AIC[ length(df.clean.train.step$anova$AIC) ] 
 #Plots for the model
-mlrplots(df.clean.train.step, TRUE)
+mlrplots(df.clean.train.step)
+
+for(i in c(2:length(df.clean.train.step$model) ) )
+{
+  plot(df.clean.train.step$model[,i], df.clean.train.step$residuals, xlab = names(df.clean.train.step$model)[i])
+}
 
 #Prediction
 df.clean.pred.step <- predict(df.clean.train.step, df.clean.test, type="response")

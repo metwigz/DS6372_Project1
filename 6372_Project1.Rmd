@@ -196,7 +196,7 @@ corrplot.mixed(df.clean.highcor.matrix, tl.col="black", tl.pos = "lt")
 
 ```{r echo=FALSE, include = FALSE}
 #Function to print out the plots for the multiple linear regression
-mlrplots <- function(fit)
+mlrplots <- function(fit, hidenum = TRUE)
 {
   #library(MASS)
   sres <- rstudent(fit)
@@ -207,13 +207,15 @@ mlrplots <- function(fit)
   
   #Plot residuals
   plot(fitted(fit), res, xlab = "Fitted", ylab = "Residuals")
-  abline(h=0, col="blue", lty=2)
-  
+  abline(h=0, col="blue", lty=2)  
+
   #Plot studentized residuals
   plot(fitted(fit), sres, xlab = "Fitted", ylab = "StudResiduals")
   abline(h=-2, col="blue", lty=2)
   abline(h=2, col="blue", lty=2)
-  
+  if(!hidenum)
+    text(sres~fitted(fit), y=sres, labels=ifelse( abs(sres) >= 2, names(sres),""), col="red")  
+
   #Plot Leverage - examine any observations ~2-3 times greater than the average hat value
   plot(x = leverage, y = sres, xlab = "Leverage", ylab = "StudResiduals")
   abline(h=-2, col="blue", lty=2)
@@ -229,7 +231,8 @@ mlrplots <- function(fit)
   sample_size <- length(fit$model[,1])
   plot(cooksd, xlab = "Observation", ylab = "Cooks D", col = c("blue"))
   abline(h = 4/sample_size, col="red")  # add cutoff line
-  text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4/sample_size, names(cooksd),""), col="red")  # add labels
+  if(!hidenum)
+    text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4/sample_size, names(cooksd),""), col="red")  # add labels
   
   #Histogram of residuals with normal curve
   #If the curve looks wrong try using the studentized residuals
@@ -276,18 +279,24 @@ df.clean.test <- df.clean[-df.clean.train_ind, ]
 #REMOVED HeatingQC, Exterior1st, Functional, Heating, Electrical because they didn't have enough of each level
 # + X1stFlrSF + X2ndFlrSF, and TotalSqFeet are similar so the first two were removed
 df.clean.train.fit <- lm(L_SalePrice ~ MSSubClass + MSZoning + LotFrontage + LotArea + Street + LotShape + LandContour + LotConfig + LandSlope + Neighborhood + Condition1 + Condition2 + BldgType + HouseStyle + OverallQual + OverallCond + YearBuilt + YearRemodAdd + RoofStyle + RoofMatl + Exterior2nd + MasVnrType + MasVnrArea + ExterQual + ExterCond + Foundation + BsmtQual + BsmtCond + BsmtExposure + BsmtFinType1 + BsmtFinSF1 + BsmtFinType2 + BsmtFinSF2 + BsmtUnfSF + CentralAir + LowQualFinSF + AllFullBath + AllHalfBaths + BedroomAbvGr + KitchenAbvGr + KitchenQual + Fireplaces + FireplaceQu + GarageType + GarageFinish + GarageCars + GarageQual + GarageCond + PavedDrive + WoodDeckSF + OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + PoolArea + MiscVal + MoSold + YrSold + SaleType + SaleCondition + TotalSqFeet + TotalSqFeet*GarageCars, data = df.clean.train)
+#[!(row.names(df.clean.train) %in% c("633", "94", "534", "689", "589")),]
 
 #Stepwise call
 df.clean.train.step <- stepAIC(df.clean.train.fit, direction="both", trace=FALSE)
 #Summary of stepwise with p-values
 summary(df.clean.train.step)
 #The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
-df.clean.train.step.vif <- makevif(df.clean.train.step$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.step.vif <- makevif(df.clean.train.step$model[,-c(1)], df.clean.train.step$model$L_SalePrice)
 df.clean.train.step.vif
 #Overall AIC for the model
 df.clean.train.step.aic <- df.clean.train.step$anova$AIC[ length(df.clean.train.step$anova$AIC) ] 
 #Plots for the model
 mlrplots(df.clean.train.step)
+
+for(i in c(2:length(df.clean.train.step$model) ) )
+{
+  plot(df.clean.train.step$model[,i], df.clean.train.step$residuals, xlab = names(df.clean.train.step$model)[i])
+}
 
 #Prediction
 df.clean.pred.step <- predict(df.clean.train.step, df.clean.test, type="response")
@@ -313,7 +322,11 @@ mlrplots(df.clean.train.cust)
 
 #pairs(df.clean.train[-c(1299, 890, 327),c(73, 4, 10, 15, 16, 17, 32, 44, 57, 18)])
 
-plot(df.clean.train.cust$residuals, df.clean.train.cust$model$AllFullBath)
+for(i in c(2:length(df.clean.train.cust$model) ) )
+{
+  plot(df.clean.train.cust$model[,i], df.clean.train.cust$residuals, xlab = names(df.clean.train.cust$model)[i])
+}
+#  plot(df.clean.train.cust$residuals, df.clean.train.cust$model$AllFullBath)
 
 #Predicted Values
 df.clean.pred.cust <- predict(df.clean.train.cust, df.clean.test, type="response")
@@ -478,4 +491,46 @@ min(lasso_mod$results$RMSE)
 
 ```
 
+###Two Way ANOVA
+Pretend LandSlope and CentralAir are the only variables available, since they are categorical variables, perform a Two Way ANOVA analysis.
+```{r modelfit }
+model.fit<-aov(L_SalePrice~LandSlope+CentralAir+LandSlope:CentralAir,data=df.clean)
+par(mfrow=c(1,2))
+plot(model.fit$fitted.values,model.fit$residuals,ylab="Resdiduals",xlab="Fitted")
+qqnorm(model.fit$residuals)
+```
+
+The previous graphics are not very pretty.  We can use the ggplot2 package to jazz things up a bit.
+```{r , fig.width=10, fig.height=3}
+library(gridExtra)
+library(ggplot2)
+myfits<-data.frame(fitted.values=model.fit$fitted.values,residuals=model.fit$residuals)
+
+#Residual vs Fitted
+plot1<-ggplot(myfits,aes(x=fitted.values,y=residuals))+ylab("Residuals")+
+  xlab("Predicted")+geom_point()
+
+#QQ plot of residuals  #Note the diagonal abline is only good for qqplots of normal data.
+plot2<-ggplot(myfits,aes(sample=residuals))+
+  stat_qq()+geom_abline(intercept=mean(myfits$residuals), slope = sd(myfits$residuals))
+
+#Histogram of residuals
+plot3<-ggplot(myfits, aes(x=residuals)) + 
+  geom_histogram(aes(y=..density..),binwidth=1,color="black", fill="gray")+
+  geom_density(alpha=.1, fill="red")
+
+grid.arrange(plot1, plot2,plot3, ncol=3)
+```
+
+The residual diagnostics do not provide any concern about the assumptions of a two way anova analysis.  Examining the type-III sums of squares F table we have:
+
+```{r}
+library(car)
+Anova(model.fit,type=3)
+```
+
+```{r}
+TukeyHSD(model.fit,"LandSlope:CentralAir",conf.level=.95)
+plot(TukeyHSD(model.fit,"LandSlope:CentralAir",conf.level=.95))
+```
 

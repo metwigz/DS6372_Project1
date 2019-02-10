@@ -374,7 +374,6 @@ ytest <- df.clean.combined.test$L_SalePrice
 grid=10^seq(10,-2, length =100)
 
 lasso.mod=glmnet(x,y,alpha=1, lambda=grid)
-lasso.mod$RMSE
 plot(lasso.mod)
 set.seed(123)
 #alpha=1 performs LASSO
@@ -388,4 +387,30 @@ out=glmnet(x,y,alpha=1,lambda=grid)
 lasso.coef=predict(out,type="coefficients",s=bestlambda)[1:20,]
 lasso.coef
 lasso.coef[lasso.coef!=0]
+
+df.clean.train.lasso <- lm(L_SalePrice ~ MSSubClass + LotArea + OverallQual + OverallCond + YearBuilt + YearRemodAdd + X2ndFlrSF + BedroomAbvGr + KitchenAbvGr + GarageCars , data = df.clean.train)
+summary(df.clean.train.lasso)
+
+#The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
+df.clean.train.lasso.vif <- makevif(df.clean.train.lasso$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.cust.vif
+#Plots for the model
+mlrplots(df.clean.train.lasso)
+
+#pairs(df.clean.train[-c(1299, 890, 327),c(73, 4, 10, 15, 16, 17, 32, 44, 57, 18)])
+
+for(i in c(2:length(df.clean.train.lasso$model) ) )
+{
+  plot(df.clean.train.lasso$model[,i], df.clean.train.lasso$residuals, xlab = names(df.clean.train.lasso$model)[i])
+}
+
+#Predicted Values
+df.clean.pred.lasso <- predict(df.clean.train.lasso, df.clean.test, type="response")
+
+#RMSE
+rmse(df.clean.test$SalePrice, exp(df.clean.pred.lasso))
+#Adjusted r squared on test
+adjr(cor(df.clean.test$SalePrice, exp(df.clean.pred.lasso)), length(df.clean.train$L_SalePrice), length(names(df.clean.train.lasso$model)))
+#Plot of the predicted vs actual
+plot(exp(df.clean.pred.lasso), df.clean.test$SalePrice)
 ```

@@ -375,6 +375,7 @@ grid=10^seq(10,-2, length =100)
 
 lasso.mod=glmnet(x,y,alpha=1, lambda=grid)
 plot(lasso.mod)
+#We can see from the coefficient plot that depending on the choice of tuning parameter, some of the coefficients will be exactly equal to zero. Let’s perform cross validation and see the test error.
 set.seed(123)
 #alpha=1 performs LASSO
 cv.out=cv.glmnet(x,y,alpha=1) 
@@ -382,7 +383,8 @@ plot(cv.out)
 #Optimal penalty parameter.  You can make this call visually.
 bestlambda <- cv.out$lambda.min 
 lasso.pred = predict(lasso.mod, s=bestlambda, newx=xtest)
-mean((lasso.pred-ytest)^2)
+lasso.rmse <- sqrt(mean((lasso.pred-ytest)^2))
+lasso.rmse
 out=glmnet(x,y,alpha=1,lambda=grid)
 lasso.coef=predict(out,type="coefficients",s=bestlambda)[1:20,]
 lasso.coef

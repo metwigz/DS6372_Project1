@@ -336,9 +336,9 @@ rmse(df.clean.test$SalePrice, exp(df.clean.pred.cust))
 adjr(cor(df.clean.test$SalePrice, exp(df.clean.pred.cust)), length(df.clean.train$L_SalePrice), length(names(df.clean.train.cust$model)))
 #Plot of the predicted vs actual
 plot(exp(df.clean.pred.cust), df.clean.test$SalePrice)
-
 ```
 
+### LASSO Model
 ```{r}
 library(glmnet)
 
@@ -372,139 +372,83 @@ ytest <- df.clean.combined.test$L_SalePrice
 
 #creating a huge range for the penalty parameter
 grid=10^seq(10,-2, length =100)
-lasso.mod=glmnet(x,y,alpha=1, lambda =grid)
 
-cv.out=cv.glmnet(x,y,alpha=1) #alpha=1 performs LASSO
-plot(cv.out)
-bestlambda <- cv.out$lambda.min  #Optimal penalty parameter.  You can make this call visually.
-lasso.pred = predict(lasso.mod, s=bestlambda, newx=xtest)
-
-#testMSE_LASSO <- mean((ytest-lasso.pred)^2)
-#testMSE_LASSO
-
-#coef(lasso.mod,s=bestlambda)
-
-```
-
-### Lasso Model
-```{r}
-# load libraries
-library(ggplot2)
-library(scales)
-library(ggrepel)
-library(e1071)
-library(moments)
-library(knitr)
-library(ggplot2)
-library(plyr)
-library(dplyr)
-library(corrplot)
-library(caret)
-library(gridExtra)
-library(scales)
-library(Rmisc)
-library(ggrepel)
-library(randomForest)
-library(psych)
-library(xgboost)
-
-# Handle outliers below
-#df.clean$TotalSqFeet <- df.clean$GrLivArea + df.clean$TotalBsmtSF #Moved to top
-
-ggplot(data=df.clean[!is.na(df.clean$SalePrice),], aes(x=df.clean$TotalSqFeet, y=df.clean$SalePrice)) + geom_point(col='blue') + geom_smooth(method = "lm", se=FALSE, color="black", aes(group=1)) + scale_y_continuous(breaks= seq(0, 800000, by=100000), labels = comma) + geom_text_repel(aes(label = ifelse(df.clean$GrLivArea[!is.na(df.clean$SalePrice)]>4500, rownames(df.clean),'')))
-
-# correlation with SalePrice is very strong  (0.78).
-cor(df.clean$SalePrice, df.clean$TotalSqFeet, use= "pairwise.complete.obs")
-#The two potential outliers seem to ‘outlie’ even more than before. By taking out these two outliers, the correlation increases by 5%.
-cor(df.clean$SalePrice[-c(524, 1299)], df.clean$TotalSqFeet[-c(524, 1299)], use= "pairwise.complete.obs")
-# Removing the two outliers
-df.clean <- df.clean[-c(524, 1299),]
-
-# PreProcessing predictor variables
-# 
-# Before modeling I need to center and scale the 'true numeric' predictors (so not variables that have been label encoded), and create dummy variables for the categorical predictors. Below, I am splitting the dataframe into one with all (true) numeric variables, and another dataframe holding the (ordinal) factors.
-# 
-numericVars <- which(sapply(df.clean, is.numeric)) #index vector numeric variables
-numericVarNames <- names(numericVars) #saving names vector for use later on
-cat('There are', length(numericVars), 'numeric variables')
-
-numericVarNames <- numericVarNames[!(numericVarNames %in% c('MSSubClass', 'MoSold', 'YrSold', 'SalePrice', 'OverallQual', 'OverallCond'))] 
-numericVarNames <- append(numericVarNames, c('Age', 'TotalPorchSF', 'TotBathrooms', 'TotalSqFeet'))
-
-DFnumeric <- df.clean[, names(df.clean) %in% numericVarNames]
-
-DFfactors <- df.clean[, !(names(df.clean) %in% numericVarNames)]
-DFfactors <- DFfactors[, names(DFfactors) != 'SalePrice']
-
-cat('There are', length(DFnumeric), 'numeric variables, and', length(DFfactors), 'factor variables')
-# Skewness and normalizing of the numeric predictors
-#  **Skewness**
-# Skewness is a measure of the symmetry in a distribution.  A symmetrical dataset will have a skewness equal to 0.  So, a normal distribution will have a skewness of 0. Skewness essentially measures the relative size of the two tails. As a rule of thumb, skewness should be between -1 and 1. In this range, data are considered fairly symmetrical. In order to fix the skewness, I am taking the log for all numeric predictors with an absolute skew greater than 0.8 (actually: log+1, to avoid division by zero issues).
-
-
- for(i in 1:ncol(DFnumeric)){
-   if (abs(skew(DFnumeric[,i]))>0.8){
-     DFnumeric[,i] <- log(DFnumeric[,i] +1)
-   }
- }
-#**Normalizing the data**
-# # 
-PreNum <- preProcess(DFnumeric, method=c("center", "scale"))
-print(PreNum)
-
-DFnorm <- predict(PreNum, DFnumeric)
-dim(DFnorm)
-###One hot encoding the categorical variables
-# # 
-#The last step needed to ensure that all predictors are converted into numeric columns (which is required by most Machine Learning algorithms) is to 'one-hot encode' the categorical variables. This basically means that all (not ordinal) factor values are getting a seperate colums with 1s and 0s (1 basically means Yes/Present). To do this one-hot encoding, I am using the `model.matrix()` function.
-
-
-DFdummies <- as.data.frame(model.matrix(~.-1, DFfactors))
-dim(DFdummies)
-
-#Also taking out variables with less than 10 'ones' in the train set.
-# # 
-# # 
-fewOnes <- which(colSums(DFdummies[1:nrow(df.clean[!is.na(df.clean$SalePrice),]),])<10)
-colnames(DFdummies[fewOnes])
-DFdummies <- DFdummies[,-fewOnes] #removing predictors
-dim(DFdummies)
-combined <- cbind(DFnorm, DFdummies) #combining all (now numeric) predictors into one dataframe 
-# # 
-df.clean$SalePrice <- log(df.clean$SalePrice) #default is the natural logarithm, "+1" is not necessary as there are no 0's
-skew(df.clean$SalePrice)
-# # 
-# # ##Composing train and test sets
-# # 
-train1 <- combined[!is.na(df.clean$SalePrice),]
-test1 <- combined[is.na(df.clean$SalePrice),]
-# # 
+lasso.mod=glmnet(x,y,alpha=1, lambda=grid)
+plot(lasso.mod)
+#We can see from the coefficient plot that depending on the choice of tuning parameter, some of the coefficients will be exactly equal to zero. Let’s perform cross validation and see the test error.
 set.seed(123)
-my_control <-trainControl(method="cv", number=5)
-lassoGrid <- expand.grid(alpha = 1, lambda = seq(0.001,0.1,by = 0.0005))
-# # 
-lasso_mod <- train(x=train1, y=df.clean$SalePrice[!is.na(df.clean$SalePrice)], method='glmnet', trControl= my_control, tuneGrid=lassoGrid) 
-lasso_mod$bestTune
-min(lasso_mod$results$RMSE)
+#alpha=1 performs LASSO
+cv.out=cv.glmnet(x,y,alpha=1) 
+plot(cv.out)
+#Optimal penalty parameter.  You can make this call visually.
+bestlambda <- cv.out$lambda.min 
+lasso.pred = predict(lasso.mod, s=bestlambda, newx=xtest)
+lasso.rmse <- sqrt(mean((lasso.pred-ytest)^2))
+lasso.rmse
+out=glmnet(x,y,alpha=1,lambda=grid)
+lasso.coef=predict(out,type="coefficients",s=bestlambda)[1:20,]
+lasso.coef
+lasso.coef[lasso.coef!=0]
 
-#
+df.clean.train.lasso <- lm(L_SalePrice ~ MSSubClass + LotArea + OverallQual + OverallCond + YearBuilt + YearRemodAdd + X2ndFlrSF + BedroomAbvGr + KitchenAbvGr + GarageCars , data = df.clean.train)
+summary(df.clean.train.lasso)
 
+#The VIF's for the data (only numeric), the -c(1) removes the y component (L_SalePrice)
+df.clean.train.lasso.vif <- makevif(df.clean.train.lasso$model[,-c(1)], df.clean.test$L_SalePrice)
+df.clean.train.cust.vif
+#Plots for the model
+mlrplots(df.clean.train.lasso)
+
+#pairs(df.clean.train[-c(1299, 890, 327),c(73, 4, 10, 15, 16, 17, 32, 44, 57, 18)])
+
+for(i in c(2:length(df.clean.train.lasso$model) ) )
+{
+  plot(df.clean.train.lasso$model[,i], df.clean.train.lasso$residuals, xlab = names(df.clean.train.lasso$model)[i])
+}
+
+#Predicted Values
+df.clean.pred.lasso <- predict(df.clean.train.lasso, df.clean.test, type="response")
+
+#RMSE
+rmse(df.clean.test$SalePrice, exp(df.clean.pred.lasso))
+#Adjusted r squared on test
+adjr(cor(df.clean.test$SalePrice, exp(df.clean.pred.lasso)), length(df.clean.train$L_SalePrice), length(names(df.clean.train.lasso$model)))
+#Plot of the predicted vs actual
+plot(exp(df.clean.pred.lasso), df.clean.test$SalePrice)
 ```
 
 ###Two Way ANOVA
-Pretend LandSlope and CentralAir are the only variables available, since they are categorical variables, perform a Two Way ANOVA analysis.
-```{r modelfit }
-model.fit<-aov(L_SalePrice~LandSlope+CentralAir+LandSlope:CentralAir,data=df.clean)
-par(mfrow=c(1,2))
-plot(model.fit$fitted.values,model.fit$residuals,ylab="Resdiduals",xlab="Fitted")
-qqnorm(model.fit$residuals)
+
+```{r}
+mysummary<-function(x){
+  result<-c(length(x),mean(x),sd(x))
+  names(result)<-c("N","Mean","SD")
+  return(result)
+}
+sumstats<-aggregate(L_SalePrice~LandSlope*CentralAir,data=df.clean,mysummary)
+sumstats<-cbind(sumstats[,1:2],sumstats[,-(1:2)])
+sumstats
+library(ggplot2)
+ggplot(sumstats,aes(x=LandSlope,y=Mean,group=CentralAir,colour=CentralAir))+
+  ylab("L_SalePrice")+
+  geom_line()+
+  geom_point()+
+  geom_errorbar(aes(ymin=Mean-SD,ymax=Mean+SD),width=.1)
+
 ```
 
-The previous graphics are not very pretty.  We can use the ggplot2 package to jazz things up a bit.
+
+```{r}
+#Fit the two way ANOVA model
+model.aov<-aov(L_SalePrice~LandSlope+CentralAir+LandSlope:CentralAir,data=df.clean)
+```
+
+
 ```{r , fig.width=10, fig.height=3}
+#check the residual diagnostic plots to see if there is any violation of the assumptions.
 library(gridExtra)
 library(ggplot2)
-myfits<-data.frame(fitted.values=model.fit$fitted.values,residuals=model.fit$residuals)
+myfits<-data.frame(fitted.values=model.aov$fitted.values,residuals=model.aov$residuals)
 
 #Residual vs Fitted
 plot1<-ggplot(myfits,aes(x=fitted.values,y=residuals))+ylab("Residuals")+
@@ -522,15 +466,57 @@ plot3<-ggplot(myfits, aes(x=residuals)) +
 grid.arrange(plot1, plot2,plot3, ncol=3)
 ```
 
-The residual diagnostics do not provide any concern about the assumptions of a two way anova analysis.  Examining the type-III sums of squares F table we have:
 
 ```{r}
+#Examining the type-III sums of squares F table
 library(car)
-Anova(model.fit,type=3)
+Anova(model.aov,type=3)
 ```
 
 ```{r}
-TukeyHSD(model.fit,"LandSlope:CentralAir",conf.level=.95)
-plot(TukeyHSD(model.fit,"LandSlope:CentralAir",conf.level=.95))
+#Tukey adjustment for comparison of all combination of groups
+TukeyHSD(model.aov,"LandSlope:CentralAir",conf.level=.95)
+plot(TukeyHSD(model.aov,"LandSlope:CentralAir",conf.level=.95))
 ```
+
+```{r}
+library(lsmeans) 
+#Define contrast.factor and mycontrast objects.
+contrast.factor<-~LandSlope*CentralAir
+mycontrast<-c("GtlY-GtlN","ModY-ModN","SevY-SevN")
+dat<-df.clean
+
+```
+
+```{r}
+#Running a loop that determines the appropriate 0's and 1's for each 
+#contrast specified above.
+library(limma)
+final.result<-c()
+for( j in 1:length(mycontrast)){
+contrast.factor.names<-gsub(" ", "", unlist(strsplit(as.character(contrast.factor),split = "*", fixed = T))[-1])
+contrast.factor.2 <- vector("list", length(contrast.factor.names))
+for (i in 1:length(contrast.factor.names)) {
+  contrast.factor.2[[i]] <- levels(dat[, contrast.factor.names[i]])
+}
+new.factor.levels <- do.call(paste, c(do.call(expand.grid, 
+                                              contrast.factor.2), sep = ""))
+temp.cont<-mycontrast[j]
+contrast2 <- list(comparison = as.vector(do.call(makeContrasts, 
+                                                list(contrasts = temp.cont, levels = new.factor.levels))))
+
+contrast.result <- summary(contrast(lsmeans(model.aov, 
+                                            contrast.factor), contrast2, by = NULL))
+
+final.result<-rbind(final.result,contrast.result)
+}
+#Cleaning up and applying bonferroni correction to the number
+#of total comparisons investigated.
+final.result$contrast<-mycontrast
+final.result$bonf<-length(mycontrast)*final.result$p.value
+final.result$bonf[final.result$bonf>1]<-1
+final.result
+
+```
+
 

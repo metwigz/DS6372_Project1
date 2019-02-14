@@ -416,3 +416,107 @@ adjr(cor(df.clean.test$SalePrice, exp(df.clean.pred.lasso)), length(df.clean.tra
 #Plot of the predicted vs actual
 plot(exp(df.clean.pred.lasso), df.clean.test$SalePrice)
 ```
+
+###Two Way ANOVA
+
+```{r}
+mysummary<-function(x){
+  result<-c(length(x),mean(x),sd(x))
+  names(result)<-c("N","Mean","SD")
+  return(result)
+}
+sumstats<-aggregate(L_SalePrice~LandSlope*CentralAir,data=df.clean,mysummary)
+sumstats<-cbind(sumstats[,1:2],sumstats[,-(1:2)])
+sumstats
+library(ggplot2)
+ggplot(sumstats,aes(x=LandSlope,y=Mean,group=CentralAir,colour=CentralAir))+
+  ylab("L_SalePrice")+
+  geom_line()+
+  geom_point()+
+  geom_errorbar(aes(ymin=Mean-SD,ymax=Mean+SD),width=.1)
+
+```
+
+
+```{r}
+#Fit the two way ANOVA model
+model.aov<-aov(L_SalePrice~LandSlope+CentralAir+LandSlope:CentralAir,data=df.clean)
+```
+
+
+```{r , fig.width=10, fig.height=3}
+#check the residual diagnostic plots to see if there is any violation of the assumptions.
+library(gridExtra)
+library(ggplot2)
+myfits<-data.frame(fitted.values=model.aov$fitted.values,residuals=model.aov$residuals)
+
+#Residual vs Fitted
+plot1<-ggplot(myfits,aes(x=fitted.values,y=residuals))+ylab("Residuals")+
+  xlab("Predicted")+geom_point()
+
+#QQ plot of residuals  #Note the diagonal abline is only good for qqplots of normal data.
+plot2<-ggplot(myfits,aes(sample=residuals))+
+  stat_qq()+geom_abline(intercept=mean(myfits$residuals), slope = sd(myfits$residuals))
+
+#Histogram of residuals
+plot3<-ggplot(myfits, aes(x=residuals)) + 
+  geom_histogram(aes(y=..density..),binwidth=1,color="black", fill="gray")+
+  geom_density(alpha=.1, fill="red")
+
+grid.arrange(plot1, plot2,plot3, ncol=3)
+```
+
+
+```{r}
+#Examining the type-III sums of squares F table
+library(car)
+Anova(model.aov,type=3)
+```
+
+```{r}
+#Tukey adjustment for comparison of all combination of groups
+TukeyHSD(model.aov,"LandSlope:CentralAir",conf.level=.95)
+plot(TukeyHSD(model.aov,"LandSlope:CentralAir",conf.level=.95))
+```
+
+```{r}
+library(lsmeans) 
+#Define contrast.factor and mycontrast objects.
+contrast.factor<-~LandSlope*CentralAir
+mycontrast<-c("GtlY-GtlN","ModY-ModN","SevY-SevN")
+dat<-df.clean
+
+```
+
+```{r}
+#Running a loop that determines the appropriate 0's and 1's for each 
+#contrast specified above.
+library(limma)
+final.result<-c()
+for( j in 1:length(mycontrast)){
+contrast.factor.names<-gsub(" ", "", unlist(strsplit(as.character(contrast.factor),split = "*", fixed = T))[-1])
+contrast.factor.2 <- vector("list", length(contrast.factor.names))
+for (i in 1:length(contrast.factor.names)) {
+  contrast.factor.2[[i]] <- levels(dat[, contrast.factor.names[i]])
+}
+new.factor.levels <- do.call(paste, c(do.call(expand.grid, 
+                                              contrast.factor.2), sep = ""))
+temp.cont<-mycontrast[j]
+contrast2 <- list(comparison = as.vector(do.call(makeContrasts, 
+                                                list(contrasts = temp.cont, levels = new.factor.levels))))
+
+contrast.result <- summary(contrast(lsmeans(model.aov, 
+                                            contrast.factor), contrast2, by = NULL))
+
+final.result<-rbind(final.result,contrast.result)
+}
+#Cleaning up and applying bonferroni correction to the number
+#of total comparisons investigated.
+final.result$contrast<-mycontrast
+final.result$bonf<-length(mycontrast)*final.result$p.value
+final.result$bonf[final.result$bonf>1]<-1
+final.result
+
+```
+
+
